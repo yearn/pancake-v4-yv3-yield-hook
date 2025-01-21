@@ -42,18 +42,20 @@ contract CLYearnVaultV3YieldHook is CLBaseHook {
 
     /// @notice Mapping of pool IDs to their corresponding yield vault information
     mapping(PoolId => YieldVaults) public yieldVaults;
-    
+
     /// @notice Address of the hook manager contract
     address public hookManager;
 
     /// @notice Minimum buffer size in basis points (20%)
     uint16 public minBufferBps = 2_000;
-    
+
     /// @notice Target buffer size in basis points (40%)
     uint16 public targetBufferBps = 4_000;
-    
+
     /// @notice Maximum buffer size in basis points (50%)
     uint16 public maxBufferBps = 5_000;
+
+    uint256 private constant MAX_BPS = 10_000;
 
     //event BufferUpdated(
     //    PoolId indexed poolId,
@@ -110,9 +112,9 @@ contract CLYearnVaultV3YieldHook is CLBaseHook {
     /// @notice Called after a pool is initialized
     /// @dev Sets up the Yearn vaults for both tokens in the pool
     /// @param key The pool key containing token pair and fee information
-    /// @param sqrtPriceX96 The initial sqrt price of the pool
-    /// @param tick The initial tick of the pool
-    /// @param hookData Additional data used by the hook
+    /// @param . sqrtPriceX96 The initial sqrt price of the pool
+    /// @param . tick The initial tick of the pool
+    /// @param . hookData Additional data used by the hook
     /// @return The function selector
     function afterInitialize(
         address,
@@ -141,7 +143,7 @@ contract CLYearnVaultV3YieldHook is CLBaseHook {
     /// @dev Distributes yield if the current tick is within the provided tick range
     /// @param key The pool key containing token pair and fee information
     /// @param params The parameters for adding liquidity
-    /// @param hookData Additional data used by the hook
+    /// @param . hookData Additional data used by the hook
     /// @return The function selector
     function beforeAddLiquidity(
         address,
@@ -162,9 +164,9 @@ contract CLYearnVaultV3YieldHook is CLBaseHook {
     /// @notice Called after liquidity is added to the pool
     /// @dev Ensures proper swap buffer levels are maintained
     /// @param key The pool key containing token pair and fee information
-    /// @param params The parameters for adding liquidity
-    /// @param delta The change in token balances from the operation
-    /// @param hookData Additional data used by the hook
+    /// @param . params The parameters for adding liquidity
+    /// @param . delta The change in token balances from the operation
+    /// @param . hookData Additional data used by the hook
     /// @return selector The function selector
     /// @return deltaAdjusted The adjusted balance delta
     function afterAddLiquidity(
@@ -175,6 +177,7 @@ contract CLYearnVaultV3YieldHook is CLBaseHook {
         bytes calldata
     ) external override poolManagerOnly returns (bytes4, BalanceDelta) {
         _ensureSwapBuffer(key);
+        _takeFunds(key);
 
         return (
             this.afterAddLiquidity.selector,
@@ -186,7 +189,7 @@ contract CLYearnVaultV3YieldHook is CLBaseHook {
     /// @dev Distributes yield if the current tick is within the provided tick range
     /// @param key The pool key containing token pair and fee information
     /// @param params The parameters for removing liquidity
-    /// @param hookData Additional data used by the hook
+    /// @param . hookData Additional data used by the hook
     /// @return The function selector
     function beforeRemoveLiquidity(
         address,
@@ -207,9 +210,9 @@ contract CLYearnVaultV3YieldHook is CLBaseHook {
     /// @notice Called after liquidity is removed from the pool
     /// @dev Ensures proper swap buffer levels are maintained after removal
     /// @param key The pool key containing token pair and fee information
-    /// @param params The parameters for removing liquidity
-    /// @param delta The change in token balances from the operation
-    /// @param hookData Additional data used by the hook
+    /// @param . params The parameters for removing liquidity
+    /// @param balanceDelta The change in token balances from the operation
+    /// @param . hookData Additional data used by the hook
     /// @return selector The function selector
     /// @return deltaAdjusted The adjusted balance delta
     function afterRemoveLiquidity(
@@ -235,7 +238,7 @@ contract CLYearnVaultV3YieldHook is CLBaseHook {
     /// @dev Checks if the swap will cross a tick and distributes yield if necessary
     /// @param key The pool key containing token pair and fee information
     /// @param params The parameters for the swap
-    /// @param hookData Additional data used by the hook
+    /// @param . hookData Additional data used by the hook
     /// @return selector The function selector
     /// @return delta The before swap delta
     /// @return hookFee The fee charged by the hook
@@ -260,9 +263,9 @@ contract CLYearnVaultV3YieldHook is CLBaseHook {
     /// @notice Called after a swap occurs
     /// @dev Ensures proper swap buffer levels are maintained after the swap
     /// @param key The pool key containing token pair and fee information
-    /// @param params The parameters for the swap
-    /// @param delta The change in token balances from the operation
-    /// @param hookData Additional data used by the hook
+    /// @param . params The parameters for the swap
+    /// @param balanceDelta The change in token balances from the operation
+    /// @param . hookData Additional data used by the hook
     /// @return selector The function selector
     /// @return hookWithdraw The amount to withdraw from the hook
     function afterSwap(
@@ -285,14 +288,14 @@ contract CLYearnVaultV3YieldHook is CLBaseHook {
     /// @dev Locks the vault and calls internal _takeFunds function
     /// @param key The pool key containing token pair and fee information
     function takeFunds(PoolKey calldata key) external {
-        vault.lock(abi.encodeCall(CLYearnVaultV3YieldHook._takeFunds, (key)));
+        vault.lock(abi.encodeCall(this._takeFunds, (key)));
     }
 
     /// @notice Internal implementation for depositing idle funds into Yearn vaults
     /// @dev Takes idle balances of both tokens and deposits them into their respective Yearn vaults
     /// @dev Updates vault share balances and resets idle balances to zero
     /// @param key The pool key containing token pair and fee information
-    function _takeFunds(PoolKey calldata key) external selfOnly {
+    function _takeFunds(PoolKey calldata key) public selfOnly {
         PoolId id = key.toId();
         YieldVaults memory _yieldVaults = yieldVaults[id];
 
@@ -383,10 +386,11 @@ contract CLYearnVaultV3YieldHook is CLBaseHook {
 
         if (_yieldVaults.vault0 != address(0)) {
             uint256 poolToken0Balance; // TODO: figure out how to get this
-            uint256 currentRatio = uint256(
-                int256(1e18 - _yieldVaults.amount0TotalBalance) /
-                    (int256(poolToken0Balance) + amount0)
-            );
+            uint256 currentRatio = MAX_BPS -
+                uint256(
+                    int256(_yieldVaults.amount0TotalBalance * MAX_BPS) /
+                        (int256(poolToken0Balance) + amount0)
+                );
 
             if (
                 currentRatio < minBufferBps ||
@@ -400,10 +404,11 @@ contract CLYearnVaultV3YieldHook is CLBaseHook {
 
         if (_yieldVaults.vault1 != address(0)) {
             uint256 poolToken1Balance; // TODO: figure out how to get this
-            uint256 currentRatio = uint256(
-                int256(1e18 - _yieldVaults.amount1TotalBalance) /
-                    (int256(poolToken1Balance) + amount1)
-            );
+            uint256 currentRatio = MAX_BPS -
+                uint256(
+                    int256(_yieldVaults.amount1TotalBalance * MAX_BPS) /
+                        (int256(poolToken1Balance) + amount1)
+                );
 
             if (
                 currentRatio < minBufferBps ||
