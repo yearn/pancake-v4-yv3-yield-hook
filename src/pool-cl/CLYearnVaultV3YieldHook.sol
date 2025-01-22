@@ -179,9 +179,9 @@ contract CLYearnVaultV3YieldHook is CLBaseHook {
         external
         override
         poolManagerOnly
-        returns (bytes4, BalanceDelta _afterDelta)
+        returns (bytes4, BalanceDelta)
     {
-        _afterDelta = _ensureSwapBuffer(key);
+        BalanceDelta _afterDelta = _ensureSwapBuffer(key);
         _takeFunds(key);
 
         return (this.afterAddLiquidity.selector, _afterDelta);
@@ -259,7 +259,7 @@ contract CLYearnVaultV3YieldHook is CLBaseHook {
     /// @notice Called after a swap occurs
     /// @dev Ensures proper swap buffer levels are maintained after the swap
     /// @param key The pool key containing token pair and fee information
-    /// @param . params The parameters for the swap
+    /// @param params The parameters for the swap
     /// @param balanceDelta The change in token balances from the operation
     /// @param . hookData Additional data used by the hook
     /// @return selector The function selector
@@ -267,16 +267,16 @@ contract CLYearnVaultV3YieldHook is CLBaseHook {
     function afterSwap(
         address,
         PoolKey calldata key,
-        ICLPoolManager.SwapParams calldata,
+        ICLPoolManager.SwapParams calldata params,
         BalanceDelta balanceDelta,
         bytes calldata
     ) external override poolManagerOnly returns (bytes4, int128) {
+        BalanceDelta delta = _ensureSwapBuffer(key, balanceDelta);
 
-
-        return (this.afterSwap.selector,         _ensureSwapBuffer(
-            key,
-            balanceDelta
-        ));
+        return (
+            this.afterSwap.selector,
+            params.zeroForOne ? delta.amount0() : delta.amount1()
+        );
     }
 
     /// @notice External function to deposit idle funds into Yearn vaults
@@ -357,7 +357,7 @@ contract CLYearnVaultV3YieldHook is CLBaseHook {
     /// @notice Ensures the swap buffer is maintained within acceptable limits
     /// @dev Overloaded function that calls _ensureSwapBuffer with zero amounts
     /// @param key The pool key containing token pair and fee information
-    /// @return BalanceDelta The balance changes required to maintain buffer
+    /// @return BalanceDelta The hook balance changes required to maintain buffer
     function _ensureSwapBuffer(
         PoolKey calldata key
     ) private returns (BalanceDelta) {
@@ -367,7 +367,8 @@ contract CLYearnVaultV3YieldHook is CLBaseHook {
     /// @notice Ensures the swap buffer is maintained within acceptable limits
     /// @dev Overloaded function that calls _ensureSwapBuffer with zero amounts
     /// @param key The pool key containing token pair and fee information
-    /// @return BalanceDelta The balance changes required to maintain buffer
+    /// @param delta The delta of the user performing an action on the pool
+    /// @return BalanceDelta The hook balance changes required to maintain buffer
     function _ensureSwapBuffer(
         PoolKey calldata key,
         BalanceDelta delta
@@ -375,8 +376,8 @@ contract CLYearnVaultV3YieldHook is CLBaseHook {
         return
             _ensureSwapBuffer(
                 key,
-                int256(delta.amount0),
-                int256(delta.amount1)
+                int256(delta.amount0()),
+                int256(delta.amount1())
             );
     }
 
