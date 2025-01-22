@@ -173,16 +173,18 @@ contract CLYearnVaultV3YieldHook is CLBaseHook {
         address,
         PoolKey calldata key,
         ICLPoolManager.ModifyLiquidityParams calldata,
-        BalanceDelta,
+        BalanceDelta _beforeDelta,
         bytes calldata
-    ) external override poolManagerOnly returns (bytes4, BalanceDelta) {
-        _ensureSwapBuffer(key);
+    )
+        external
+        override
+        poolManagerOnly
+        returns (bytes4, BalanceDelta _afterDelta)
+    {
+        _afterDelta = _ensureSwapBuffer(key);
         _takeFunds(key);
 
-        return (
-            this.afterAddLiquidity.selector,
-            BalanceDeltaLibrary.ZERO_DELTA
-        );
+        return (this.afterAddLiquidity.selector, _afterDelta);
     }
 
     /// @notice Called before liquidity is removed from the pool
@@ -222,15 +224,9 @@ contract CLYearnVaultV3YieldHook is CLBaseHook {
         BalanceDelta balanceDelta,
         bytes calldata
     ) external override poolManagerOnly returns (bytes4, BalanceDelta) {
-        _ensureSwapBuffer(
-            key,
-            int256(balanceDelta.amount0()),
-            int256(balanceDelta.amount1())
-        );
-
         return (
             this.afterRemoveLiquidity.selector,
-            BalanceDeltaLibrary.ZERO_DELTA
+            _ensureSwapBuffer(key, balanceDelta)
         );
     }
 
@@ -275,13 +271,12 @@ contract CLYearnVaultV3YieldHook is CLBaseHook {
         BalanceDelta balanceDelta,
         bytes calldata
     ) external override poolManagerOnly returns (bytes4, int128) {
-        _ensureSwapBuffer(
-            key,
-            int256(balanceDelta.amount0()),
-            int256(balanceDelta.amount1())
-        );
 
-        return (this.afterSwap.selector, 0);
+
+        return (this.afterSwap.selector,         _ensureSwapBuffer(
+            key,
+            balanceDelta
+        ));
     }
 
     /// @notice External function to deposit idle funds into Yearn vaults
@@ -367,6 +362,22 @@ contract CLYearnVaultV3YieldHook is CLBaseHook {
         PoolKey calldata key
     ) private returns (BalanceDelta) {
         return _ensureSwapBuffer(key, 0, 0);
+    }
+
+    /// @notice Ensures the swap buffer is maintained within acceptable limits
+    /// @dev Overloaded function that calls _ensureSwapBuffer with zero amounts
+    /// @param key The pool key containing token pair and fee information
+    /// @return BalanceDelta The balance changes required to maintain buffer
+    function _ensureSwapBuffer(
+        PoolKey calldata key,
+        BalanceDelta delta
+    ) private returns (BalanceDelta) {
+        return
+            _ensureSwapBuffer(
+                key,
+                int256(delta.amount0),
+                int256(delta.amount1)
+            );
     }
 
     /// @notice Ensures the swap buffer is maintained within acceptable limits
