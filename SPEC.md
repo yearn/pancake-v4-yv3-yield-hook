@@ -136,7 +136,8 @@ function _ensureSwapBuffer(PoolKey calldata key, int256 amount0, int256 amount1)
    - Calculates current buffer ratio using MAX_BPS (10,000)
    - Checks if ratios within bounds (min/max buffer BPS)
    - Ensures sufficient funds for pending operation
-   - Adjusts vault deposits/withdrawals to maintain target ratio
+   - Adjusts funds available for deposit to maintain target ratio
+   - Returns the hook's `BalanceDelta` to achieve the above
 
 ### Fund Management
 
